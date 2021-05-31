@@ -1,1 +1,1 @@
-# EHGNN
+# Edege Representation Learning with Hypergraphs
