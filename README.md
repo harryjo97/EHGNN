@@ -10,9 +10,9 @@ This code is the official implementation of Edge Representation Learning with Hy
 
 ## Training and Evaluation
 
-We provide the commands for the following tasks: graph Reconstruction and graph classification
+We provide the commands for the following tasks: Graph Reconstruction and Graph Classification
 
-For each command, the first argument denotes the gpu id and the second argument dentes the experiment number.
+For each command, the first argument denotes the gpu id and the second argument denotes the experiment number.
 
 + Edge Reconstruction on the ZINC dataset
 
