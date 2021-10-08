@@ -39,10 +39,6 @@ class Trainer(object):
         self.exp_name = self.set_experiment_name()
 
         self.use_cuda = args.gpu >= 0 and torch.cuda.is_available()
-        if self.args.debug:
-            print('Debug Mode')
-            self.use_cuda = False
-
         if self.use_cuda:
             torch.cuda.set_device(args.gpu)
             self.args.device = 'cuda:{}'.format(args.gpu)

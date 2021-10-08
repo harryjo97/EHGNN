@@ -1,19 +1,15 @@
 import torch
 import torch.nn.functional as F
 import numpy as np
-
 from collections import Counter
-
 import torch_geometric
 from torch_geometric.utils import to_dense_batch, to_dense_adj
 from rdkit import Chem as Chem
 from rdkit.Chem import Draw
-
 import os
 import os.path as osp
 import shutil
 import pickle
-
 from tqdm import tqdm
 from torch_geometric.data import (InMemoryDataset, Data, download_url,
                                   extract_zip)

@@ -1,11 +1,9 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-
 from torch_geometric.nn.pool.topk_pool import topk
 from torch_geometric.nn import global_mean_pool as gap, global_max_pool as gmp, global_add_pool as gsp
 from torch_geometric.utils import to_dense_batch
-
 from models.layers import HypergraphConv, GCNConv_OGB, GMPool
 from torch_geometric.nn import GCNConv
 from ogb.graphproppred.mol_encoder import AtomEncoder, BondEncoder
@@ -19,17 +17,15 @@ class GraphRepresentation(nn.Module):
         super(GraphRepresentation, self).__init__()
 
         self.args = args
-
         self.num_node_features = args.num_node_features
         self.num_edge_features = args.num_edge_features
         self.nhid = args.num_hidden
         self.num_classes = args.num_classes
-
         self.edge_ratio = args.edge_ratio
         self.dropout_ratio = args.dropout
-
         self.enhid = self.nhid
 
+    ### Dual Hypergraph Transformation (DHT)
     def DHT(self, edge_index, batch, add_loops=True):
 
         num_edge = edge_index.size(1)
@@ -76,7 +72,7 @@ class GraphRepresentation(nn.Module):
 
         return convs
 
-
+### HyperDrop model for TU dataset
 class Model_HyperDrop(GraphRepresentation):
 
     def __init__(self, args):
@@ -85,13 +81,10 @@ class Model_HyperDrop(GraphRepresentation):
 
         if self.args.data == 'COLLAB':
             self.enhid = self.nhid // 8
-
         self.convs = self.get_convs()
         self.hyperconvs = self.get_convs(conv_type='Hyper')[:-1]
-
         self.scoreconvs = self.get_scoreconvs()
         self.classifier = self.get_classifier(dim=3)
-
 
     def forward(self, data):
 
@@ -158,6 +151,8 @@ class Model_HyperDrop(GraphRepresentation):
 
         return convs
 
+
+### HyperDrop model for OGB dataset
 class Model_HyperDrop_OGB(GraphRepresentation):
 
     def __init__(self, args):
@@ -166,10 +161,8 @@ class Model_HyperDrop_OGB(GraphRepresentation):
 
         self.atom_encoder = AtomEncoder(self.nhid)
         self.bond_encoder = BondEncoder(self.nhid)
-
         self.convs = self.get_convs()
         self.hyperconvs = self.get_convs(conv_type='Hyper')[:-1]
-
         self.scoreconvs = self.get_scoreconvs()
         self.classifier = self.get_classifier(dim=3)
 
@@ -231,6 +224,8 @@ class Model_HyperDrop_OGB(GraphRepresentation):
 
         return convs
  
+
+ ### HyperCluster model
 class Model_HyperCluster(GraphRepresentation):
 
     def __init__(self, args):
@@ -242,11 +237,9 @@ class Model_HyperCluster(GraphRepresentation):
         self.ln = self.args.ln
         self.num_heads = self.args.num_heads
         self.cluster = self.args.cluster
-
         self.convs = self.get_convs()
         self.unconvs = self.get_unconvs()
         self.last = HypergraphConv(self.nhid, self.num_edge_features)
-
         self.pool = GMPool(self.nhid, self.num_heads, self.num_seeds_edge, ln=self.ln, cluster=self.cluster, mab_conv='Hyper')
 
     def forward(self, data):
@@ -254,7 +247,7 @@ class Model_HyperCluster(GraphRepresentation):
         x, edge_index, edge_attr, batch = data.x, data.edge_index, data.edge_attr, data.batch
         hyperedge_index, edge_batch = self.DHT(edge_index, batch)
 
-        # MPs
+        # Message Passing
         for _ in range(self.args.num_convs):
             edge_attr = F.relu( self.convs[_](edge_attr, hyperedge_index) )
 
@@ -271,7 +264,7 @@ class Model_HyperCluster(GraphRepresentation):
         edge_attr = torch.bmm(attn.transpose(1, 2), batch_edge_attr)   
         edge_attr = edge_attr[mask]
 
-        # MPs
+        # Message Passing
         for _ in range(self.args.num_convs):
             edge_attr = F.relu( self.unconvs[_](edge_attr, hyperedge_index) )
 

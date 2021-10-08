@@ -40,10 +40,7 @@ class Trainer(object):
         self.exp_name = self.experiment_name()
         self.ckpt = os.path.join('./checkpoints/{}'.format(self.log_folder_name), f"best_molecule_{self.args.seed}.pth")
 
-        self.use_cuda = args.gpu >= 0 and torch.cuda.is_available()
-        if self.args.debug:
-            self.use_cuda = False
-            
+        self.use_cuda = args.gpu >= 0 and torch.cuda.is_available()       
         if self.use_cuda:
             torch.cuda.set_device(args.gpu)
             self.args.device = 'cuda:{}'.format(args.gpu)
@@ -119,8 +116,6 @@ class Trainer(object):
         epoch_iter = trange(0, self.args.num_epochs, desc='[EPOCH]', position=1)
 
         for epoch in epoch_iter:
-            
-            if self.args.test_only: break
 
             self.model.train()
             

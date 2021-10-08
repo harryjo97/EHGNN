@@ -8,40 +8,8 @@ from torch_geometric.nn.conv import MessagePassing, GCNConv
 from torch_geometric.nn.inits import glorot, zeros
 import math
 
-class GCNConv_OGB(MessagePassing):
-    def __init__(self, emb_dim):
-        
-        super(GCNConv_OGB, self).__init__(aggr='add')
 
-        self.linear_node = torch.nn.Linear(emb_dim, emb_dim)
-        self.linear_edge = torch.nn.Linear(emb_dim, emb_dim)
-        self.root_emb = torch.nn.Embedding(1, emb_dim)
-
-    def forward(self, x, edge_index, edge_attr, edge_weight=None):
-
-        x = self.linear_node(x)
-        edge_attr = self.linear_edge(edge_attr)
-
-        row, col = edge_index
-
-        if edge_weight is None:
-            edge_weight = torch.ones((edge_index.size(1), ), device=edge_index.device)
-
-        num_nodes = x.size(0)
-        deg = scatter_add(edge_weight, col, dim=0, dim_size=num_nodes) + 1
-        deg_inv_sqrt = deg.pow(-0.5)
-        deg_inv_sqrt.masked_fill_(deg_inv_sqrt == float('inf'), 0)
-
-        norm = deg_inv_sqrt[row] * edge_weight * deg_inv_sqrt[col]
-
-        return self.propagate(edge_index, x=x, edge_attr=edge_attr, norm=norm) + F.relu(x + self.root_emb.weight) * 1./deg.view(-1,1)
-
-    def message(self, x_j, edge_attr, norm):
-        return norm.view(-1, 1) * F.relu(x_j + edge_attr)
-
-    def update(self, aggr_out):
-        return aggr_out
-
+### Hypergraph convolution for message passing on Dual Hypergraph 
 class HypergraphConv(MessagePassing):
 
     def __init__(self, in_channels, out_channels, use_attention=False, heads=1,
@@ -90,14 +58,7 @@ class HypergraphConv(MessagePassing):
         return out
 
     def forward(self, x, hyperedge_index, hyperedge_weight=None):
-        r"""
-        Args:
-            x (Tensor): Node feature matrix :math:`\mathbf{X}`
-            hyper_edge_index (LongTensor): Hyperedge indices from
-                :math:`\mathbf{H}`.
-            hyperedge_weight (Tensor, optional): Sparse hyperedge weights from
-                :math:`\mathbf{W}`. (default: :obj:`None`)
-        """
+        
         x = torch.matmul(x, self.weight)
         alpha = None
 
@@ -151,13 +112,14 @@ class HypergraphConv(MessagePassing):
         return "{}({}, {})".format(self.__class__.__name__, self.in_channels,
                                    self.out_channels)
 
+
+### Multi-head Attention Block used for GMPool
 class MAB(nn.Module):
     def __init__(self, dim_Q, dim_K, dim_V, num_heads, ln=False, cluster=False, conv=None):
         super(MAB, self).__init__()
         self.dim_V = dim_V
         self.num_heads = num_heads
         self.fc_q = nn.Linear(dim_Q, dim_V)
-
         self.fc_k, self.fc_v = self.get_fc_kv(dim_K, dim_V, conv)
         
         if ln:
@@ -226,6 +188,7 @@ class MAB(nn.Module):
 
         return fc_k, fc_v
 
+
 class GMPool(nn.Module):
     def __init__(self, dim, num_heads, num_seeds, ln=False, cluster=False, mab_conv=None):
         super(GMPool, self).__init__()
@@ -236,4 +199,40 @@ class GMPool(nn.Module):
         
     def forward(self, X, attention_mask=None, graph=None, return_attn=False):
         return self.mab(self.S.repeat(X.size(0), 1, 1), X, attention_mask, graph, return_attn)
+
+
+### GCN convolution for OGB datasets
+class GCNConv_OGB(MessagePassing):
+    def __init__(self, emb_dim):
+        
+        super(GCNConv_OGB, self).__init__(aggr='add')
+
+        self.linear_node = torch.nn.Linear(emb_dim, emb_dim)
+        self.linear_edge = torch.nn.Linear(emb_dim, emb_dim)
+        self.root_emb = torch.nn.Embedding(1, emb_dim)
+
+    def forward(self, x, edge_index, edge_attr, edge_weight=None):
+
+        x = self.linear_node(x)
+        edge_attr = self.linear_edge(edge_attr)
+
+        row, col = edge_index
+
+        if edge_weight is None:
+            edge_weight = torch.ones((edge_index.size(1), ), device=edge_index.device)
+
+        num_nodes = x.size(0)
+        deg = scatter_add(edge_weight, col, dim=0, dim_size=num_nodes) + 1
+        deg_inv_sqrt = deg.pow(-0.5)
+        deg_inv_sqrt.masked_fill_(deg_inv_sqrt == float('inf'), 0)
+
+        norm = deg_inv_sqrt[row] * edge_weight * deg_inv_sqrt[col]
+
+        return self.propagate(edge_index, x=x, edge_attr=edge_attr, norm=norm) + F.relu(x + self.root_emb.weight) * 1./deg.view(-1,1)
+
+    def message(self, x_j, edge_attr, norm):
+        return norm.view(-1, 1) * F.relu(x_j + edge_attr)
+
+    def update(self, aggr_out):
+        return aggr_out
 

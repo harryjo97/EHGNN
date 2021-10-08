@@ -1,9 +1,9 @@
 import os.path
-
 import torch
 from torch_geometric.datasets import TUDataset
 from torch_geometric.utils import degree
 import torch_geometric.transforms as T
+
 
 class NormalizedDegree(object):
     def __init__(self, mean, std):
@@ -15,6 +15,7 @@ class NormalizedDegree(object):
         deg = (deg - self.mean) / self.std
         data.x = deg.view(-1, 1)
         return data
+
 
 def get_dataset(name, sparse=True, cleaned=False, normalize=False):
     dataset = TUDataset(os.path.join('./data', name), name, use_node_attr=True, use_edge_attr=True, cleaned=cleaned)
@@ -51,6 +52,7 @@ def get_dataset(name, sparse=True, cleaned=False, normalize=False):
                 [dataset.transform, T.ToDense(max_num_nodes)])
 
     return dataset
+
 
 def num_graphs(data):
     if data.batch is not None:
