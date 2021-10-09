@@ -1,20 +1,14 @@
-import os
+import torch
 import time
 from tqdm import tqdm, trange
-import random
 import numpy as np
-import torch
-import torch.nn as nn
-import torch.nn.functional as F
-
-from torch_geometric.data import DataLoader
-from ogb.graphproppred import PygGraphPropPredDataset, Evaluator
-
+from ogb.graphproppred import Evaluator
 from transformers.optimization import get_cosine_schedule_with_warmup
 
 from utils.data import num_graphs
-from utils.logger import Logger
-from models.models import Model_HyperDrop_OGB
+from utils.setting import set_seed, set_logger, set_experiment_name, set_device
+from utils.loader_OGB import load_data, load_model, load_dataloader
+
 
 class Trainer(object):
 
@@ -22,114 +16,43 @@ class Trainer(object):
 
         super(Trainer, self).__init__()
 
-        # Random Seed
-        random.seed(args.seed)
-        np.random.seed(args.seed)
-        torch.manual_seed(args.seed)
-        if torch.cuda.is_available():
-            torch.cuda.manual_seed(args.seed)
-            torch.cuda.manual_seed_all(args.seed)
-        torch.backends.cudnn.deterministic = True
-        torch.backends.cudnn.benchmark = False
-
         self.args = args
-        self.exp_name = self.set_experiment_name()
 
-        self.use_cuda = args.gpu >= 0 and torch.cuda.is_available()
-        if self.use_cuda:
-            torch.cuda.set_device(args.gpu)
-            self.args.device = 'cuda:{}'.format(args.gpu)
-        else:
-            self.args.device = 'cpu'
+        ### Set seed, logger, and gpu device
+        self.seed = set_seed(self.args)
+        self.log_folder_name, self.exp_name = set_experiment_name(self.args)
+        self.logger = set_logger(self.log_folder_name, self.exp_name, self.seed)
+        self.device = set_device(self.args) 
 
-        self.dataset = self.load_data()
-
+        ### Load dataset and evaluator
+        self.dataset = load_data(args)
         self.evaluator = Evaluator(args.data)
 
-    def load_data(self):
-
-        dataset = PygGraphPropPredDataset(name = self.args.data)
-        self.args.task_type = dataset.task_type
-
-        self.args.num_node_features = dataset.data.num_node_features
-        if self.args.num_node_features == 0:
-            print('No Node Feature')
-        
-        self.args.num_edge_features = dataset.data.num_edge_features
-        if self.args.num_edge_features == 0:
-            print('No Edge Feature')
-        
-        self.args.num_classes = dataset.num_tasks
-        self.args.avg_num_nodes, self.args.avg_num_edges = np.ceil(np.mean([data.num_nodes for data in dataset])), np.ceil(np.mean([data.num_edges for data in dataset]))
-
-        print('# %s: [Task]-%s [NODE FEATURES]-%d [EDGE FEATURES]-%d [NUM_CLASSES]-%d [AVG_NODES]-%d [AVG_EDGES]-%d' % 
-            (dataset, self.args.task_type, self.args.num_node_features, self.args.num_edge_features, self.args.num_classes, self.args.avg_num_nodes, self.args.avg_num_edges))
-
-        return dataset
-
-    def load_dataloader(self):
-
-        split_idx = self.dataset.get_idx_split()
-
-        train_loader = DataLoader(self.dataset[split_idx["train"]], batch_size=self.args.batch_size, shuffle=True)
-        val_loader = DataLoader(self.dataset[split_idx["valid"]], batch_size=self.args.batch_size, shuffle=False)
-        test_loader = DataLoader(self.dataset[split_idx["test"]], batch_size=self.args.batch_size, shuffle=False)
-
-        return train_loader, val_loader, test_loader
-
-    def load_model(self):
-
-        if self.args.model == 'HyperDrop':
-
-            model = Model_HyperDrop_OGB(self.args)
-
-        else:
-
-            raise ValueError("Model Name <{}> is Unknown".format(self.args.model))
-
-        if self.use_cuda:
-
-            model.to(self.args.device)
-
-        return model
-
-    def set_log(self):
-
-        self.train_curve = []
-        self.valid_curve = []
-        self.test_curve = []
-
-        logger = Logger(str(os.path.join('./logs/{}/'.format(self.log_folder_name), 'experiment-{}_seed-{}.log'.format(self.exp_name, self.args.seed))), mode='a')
-
-        t_start = time.perf_counter()
-
-        return logger, t_start
-
-    def organize_log(self, logger, train_perf, valid_perf, test_perf, train_loss, epoch):
-
-        self.train_curve.append(train_perf[self.dataset.eval_metric])
-        self.valid_curve.append(valid_perf[self.dataset.eval_metric])
-        self.test_curve.append(test_perf[self.dataset.eval_metric])
-
-        logger.log("[Val: Epoch %d] (Loss) Loss: %.4f Train: %.4f%% Valid: %.4f%% Test: %.4f%% " % (
-            epoch, train_loss, self.train_curve[-1], self.valid_curve[-1], self.test_curve[-1]))
 
     def train(self):
 
-        train_loader, val_loader, test_loader = self.load_dataloader()
+        train_loader, val_loader, test_loader = load_dataloader(self.args, self.dataset)
 
-        # Load Model & Optimizer
-        self.model = self.load_model()
-        self.optimizer = torch.optim.Adam(self.model.parameters(), lr = self.args.lr, weight_decay = self.args.weight_decay)
+        ### Load model and optimizer
+        self.model = load_model(self.args).to(self.device)
+        self.optimizer = torch.optim.Adam(self.model.parameters(), lr = self.args.lr, 
+                                            weight_decay = self.args.weight_decay)
 
         self.cls_criterion = torch.nn.BCEWithLogitsLoss()
         self.reg_criterion = torch.nn.MSELoss()
 
         if self.args.lr_schedule:
-            self.scheduler = get_cosine_schedule_with_warmup(self.optimizer, self.args.patience * len(train_loader), self.args.num_epochs * len(train_loader))
+            self.scheduler = get_cosine_schedule_with_warmup(self.optimizer, 
+                                                                self.args.patience * len(train_loader), 
+                                                                self.args.num_epochs * len(train_loader))
 
-        logger, t_start = self.set_log()
+        ### Train
+        train_curve = []
+        valid_curve = []
+        test_curve = []
+        eval_metric = self.dataset.eval_metric
 
+        t_start = time.perf_counter()
         for epoch in trange(0, (self.args.num_epochs), desc = '[Epoch]', position = 1):
 
             self.model.train()
@@ -140,15 +63,16 @@ class Trainer(object):
                 if data.x.shape[0] == 1 or data.batch[-1] == 0: pass
 
                 self.optimizer.zero_grad()
-                data = data.to(self.args.device)
+                data = data.to(self.device)
                 out = self.model(data)
 
                 is_labeled = data.y == data.y
-
                 if "classification" in self.args.task_type: 
-                    loss = self.cls_criterion(out.to(torch.float32)[is_labeled], data.y.to(torch.float32)[is_labeled])
+                    loss = self.cls_criterion(out.to(torch.float32)[is_labeled], 
+                                                data.y.to(torch.float32)[is_labeled])
                 else:
-                    loss = self.reg_criterion(out.to(torch.float32)[is_labeled], data.y.to(torch.float32)[is_labeled])
+                    loss = self.reg_criterion(out.to(torch.float32)[is_labeled], 
+                                                data.y.to(torch.float32)[is_labeled])
 
                 loss.backward()
                 torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.args.grad_norm)
@@ -160,35 +84,45 @@ class Trainer(object):
 
             total_loss = total_loss / len(train_loader.dataset)
 
-            train_perf, valid_perf, test_perf = self.eval(train_loader), self.eval(val_loader), self.eval(test_loader)
-            self.organize_log(logger, train_perf, valid_perf, test_perf, total_loss, epoch)
+            train_curve.append(self.eval(train_loader)[eval_metric])
+            valid_curve.append(self.eval(val_loader)[eval_metric])
+            test_curve.append(self.eval(test_loader)[eval_metric])
+
+            self.logger.log(f"[Val: Epoch {epoch:03d}] Loss: {total_loss:.4f} Train: {train_curve[-1]:.4f} "
+                            f"Valid: {valid_curve[-1]:.4f} Test: {test_curve[-1]:.4f}")
 
         t_end = time.perf_counter()
 
+        ### Report results for highest validation result
         if 'classification' in self.dataset.task_type:
-            best_val_epoch = np.argmax(np.array(self.valid_curve))
-            best_train = max(self.train_curve)
+            best_val_epoch = np.argmax(np.array(valid_curve))
+            best_train = max(train_curve)
         else:
-            best_val_epoch = np.argmin(np.array(self.valid_curve))
-            best_train = min(self.train_curve)
+            best_val_epoch = np.argmin(np.array(valid_curve))
+            best_train = min(train_curve)
 
-        best_val = self.valid_curve[best_val_epoch]
-        test_score = self.test_curve[best_val_epoch]
+        best_val = valid_curve[best_val_epoch]
+        test_score = test_curve[best_val_epoch]
 
-        logger.log("Train: {} Valid: {} Test: {} with Time: {}".format(best_train, best_val, test_score, (t_end - t_start)))
+        self.logger.log(f"Train: {best_train:4f} Valid: {best_val:4f} Test: {test_score:4f} "
+                        f"with Time: {t_end - t_start:2f}")
 
-        result_file = "./results/{}/{}-results.txt".format(self.log_folder_name, self.exp_name)
+        result_file = f"./results/{self.log_folder_name}/{self.exp_name}.txt"
         with open(result_file, 'a+') as f:
-            f.write("{}: {} {} {} {}\n".format(self.args.seed, best_train, self.train_curve[best_val_epoch], best_val, test_score))
+            f.write(f"SEED={self.seed}   Test Score:{test_score*100:.2f}\n")
 
+
+        ### Save trained model
         torch.save({
             'model_state_dict': self.model.state_dict(),
             'Val': best_val,
-            'Train': self.train_curve[best_val_epoch],
+            'Train': train_curve[best_val_epoch],
             'Test': test_score,
             'BestTrain': best_train
-            }, './checkpoints/{}/best-model_{}.pth'.format(self.log_folder_name, self.args.seed))
+            }, './checkpoints/{}/best-model_{}.pth'.format(self.log_folder_name, self.seed))
 
+
+    ### Evaluate
     def eval(self, loader):
 
         self.model.eval()
@@ -197,7 +131,7 @@ class Trainer(object):
         y_pred = []
 
         for _, batch in enumerate(tqdm(loader, desc="[Iteration]")):
-            batch = batch.to(self.args.device)
+            batch = batch.to(self.device)
 
             if batch.x.shape[0] == 1: pass
 
@@ -213,37 +147,3 @@ class Trainer(object):
         input_dict = {"y_true": y_true, "y_pred": y_pred}
 
         return self.evaluator.eval(input_dict)
-
-    def set_experiment_name(self):
-
-        ts = time.strftime('%Y-%b-%d-%H:%M:%S', time.gmtime())
-
-        self.log_folder_name = os.path.join(*[self.args.data, self.args.model, self.args.experiment_number])
-
-        if not(os.path.isdir('./checkpoints/{}'.format(self.log_folder_name))):
-            os.makedirs(os.path.join('./checkpoints/{}'.format(self.log_folder_name)))
-
-        if not(os.path.isdir('./results/{}'.format(self.log_folder_name))):
-            os.makedirs(os.path.join('./results/{}'.format(self.log_folder_name)))
-
-        if not(os.path.isdir('./logs/{}'.format(self.log_folder_name))):
-            os.makedirs(os.path.join('./logs/{}'.format(self.log_folder_name)))
-
-        print("Make Directory {} in Logs, Checkpoints and Results Folders".format(self.log_folder_name))
-
-        exp_name = str()
-        exp_name += "ER={}_".format(self.args.edge_ratio)
-        exp_name += "BS={}_".format(self.args.batch_size)
-        exp_name += "LR={}_".format(self.args.lr)
-        exp_name += "WD={}_".format(self.args.weight_decay)
-        exp_name += "GN={}_".format(self.args.grad_norm)
-        exp_name += "DO={}_".format(self.args.dropout)
-        exp_name += "HD={}_".format(self.args.num_hidden)
-        exp_name += "LS={}_".format(self.args.lr_schedule)
-        exp_name += "NC={}_".format(self.args.num_convs)
-        exp_name += "TS={}".format(ts)
-
-        # Save training arguments for reproduction
-        torch.save(self.args, os.path.join('./checkpoints/{}'.format(self.log_folder_name), 'training_args.bin'))
-
-        return exp_name

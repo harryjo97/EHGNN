@@ -1,24 +1,15 @@
 import os
 import time
-
 import rdkit
-
 from tqdm import tqdm, trange
-
-import random
-import numpy as np
 import torch
-import torch.nn as nn
-import torch.nn.functional as F
-
-from torch_geometric.data import DataLoader
 from torch_geometric.utils import to_dense_adj
-
-from utils.molecule_utils import ZINC, dataset_statistic_node, dataset_statistic_edge, mol_from_graphs, to_one_hot
-from utils.logger import Logger
-from models.models import Model_HyperCluster
-
 from transformers.optimization import get_cosine_schedule_with_warmup
+
+from utils.molecule_utils import mol_from_graphs
+from utils.setting import set_seed, set_logger, set_experiment_name, set_device
+from utils.loader_ZINC import load_data, load_model, load_dataloader
+
 
 class Trainer(object):
 
@@ -26,102 +17,46 @@ class Trainer(object):
 
         super(Trainer, self).__init__()
 
-        # Random Seed
-        random.seed(args.seed)
-        np.random.seed(args.seed)
-        torch.manual_seed(args.seed)
-        if torch.cuda.is_available():
-            torch.cuda.manual_seed(args.seed)
-            torch.cuda.manual_seed_all(args.seed)
-        torch.backends.cudnn.deterministic = True
-        torch.backends.cudnn.benchmark = False
-
         self.args = args
-        self.exp_name = self.experiment_name()
-        self.ckpt = os.path.join('./checkpoints/{}'.format(self.log_folder_name), f"best_molecule_{self.args.seed}.pth")
-
-        self.use_cuda = args.gpu >= 0 and torch.cuda.is_available()       
-        if self.use_cuda:
-            torch.cuda.set_device(args.gpu)
-            self.args.device = 'cuda:{}'.format(args.gpu)
-        else:
-            self.args.device = 'cpu'
-
-        self.train_dataset, self.val_dataset, self.test_dataset = self.load_data()
-
-    def load_data(self):
         
-        subset = True
-        
-        train_dataset = ZINC("./zinc", subset=subset, split='train', transform=to_one_hot)
-        valid_dataset = ZINC("./zinc", subset=subset, split='val', transform=to_one_hot)
-        test_dataset = ZINC("./zinc", subset=subset, split="test", transform=to_one_hot)
-        avg_num_nodes = dataset_statistic_node(train_dataset)
-        avg_num_edges = dataset_statistic_edge(train_dataset)
-        
-        self.args.num_node_features = 28 
-        self.args.num_edge_features = 5
-        self.args.num_classes = 5
-        self.args.avg_num_nodes = avg_num_nodes
-        self.args.avg_num_edges = avg_num_edges
+        ### Set seed, logger, gpu device and checkoint
+        self.seed = set_seed(self.args)
+        self.log_folder_name, self.exp_name = set_experiment_name(self.args)
+        self.logger = set_logger(self.log_folder_name, self.exp_name, self.seed) 
+        self.device = set_device(self.args) 
+        self.ckpt = os.path.join(f'./checkpoints/{self.log_folder_name}', 
+                                    f"best_molecule_{self.seed}.pth")
 
-        return train_dataset, valid_dataset, test_dataset
+        ### Load dataloader
+        self.train_loader, self.val_loader, self.test_loader = load_dataloader(self.args)
 
-    def load_dataloader(self):
-        
-        train_loader = DataLoader(dataset=self.train_dataset, batch_size=self.args.batch_size, shuffle=True)
-        val_loader = DataLoader(dataset=self.val_dataset, batch_size=self.args.batch_size, shuffle=False)
-        test_loader = DataLoader(dataset=self.test_dataset, batch_size=1, shuffle=False)
-
-        return train_loader, val_loader, test_loader
-
-    def load_model(self):
-
-        if self.args.model == 'HyperCluster':
-
-            model = Model_HyperCluster(self.args)
-
-        else:
-            raise ValueError("Model Name <{}> is Unknown".format(self.args.model))
-
-        if self.use_cuda:
-            model.to(self.args.device)
-
-        return model
-
-    def set_log(self):
-
-        self.best_loss = 1000000
-        self.patience = self.args.patience
-
-        logger = Logger(str(os.path.join('./logs/{}/'.format(self.log_folder_name), 'experiment-{}_seed-{}.log'.format(self.exp_name, self.args.seed))), mode='a')
-
-        t_start = time.perf_counter()
-
-        return logger, t_start
 
     def train(self):
 
-        train_loader, val_loader, test_loader = self.load_dataloader()
-
-        self.model = self.load_model()
+        ### Load model and optimizer
+        self.model = load_model(self.args).to(self.device)
         self.optimizer = torch.optim.Adam(self.model.parameters(), lr=self.args.lr)
-        self.criterion = nn.CrossEntropyLoss()
+        self.criterion = torch.nn.CrossEntropyLoss()
 
         if self.args.lr_schedule:
-            self.scheduler = get_cosine_schedule_with_warmup(self.optimizer, self.args.patience * len(train_loader), self.args.num_epochs * len(train_loader))
+            self.scheduler = get_cosine_schedule_with_warmup(self.optimizer, 
+                                                            self.args.patience * len(self.train_loader), 
+                                                            self.args.num_epochs * len(self.train_loader))
 
-        logger, t_start = self.set_log()
-        
+        ### Train
+        best_loss = 1e+6
+        patience = self.args.patience
+
+        t_start = time.perf_counter()
         epoch_iter = trange(0, self.args.num_epochs, desc='[EPOCH]', position=1)
 
         for epoch in epoch_iter:
 
             self.model.train()
             
-            for _, data in enumerate(tqdm(train_loader, desc='[Train]', position=0)):
+            for _, data in enumerate(tqdm(self.train_loader, desc='[Train]', position=0)):
                 self.optimizer.zero_grad()
-                data = data.to(self.args.device)
+                data = data.to(self.device)
                 out = self.model(data)
                 target = data.edge_attr.argmax(-1)
                 
@@ -132,37 +67,43 @@ class Trainer(object):
                 if self.args.lr_schedule:
                     self.scheduler.step()
 
-                desc = f"[Train] Train Loss {loss.item()}"
+                desc = f"[Train] Train Loss {loss.item():.4f}"
                 epoch_iter.set_description(desc)
                 epoch_iter.refresh()
 
-            valid_acc, valid_loss = self.eval(val_loader)
-            logger.log(f"[Epoch {epoch}] Loss: {valid_loss:.2f}, Acc: {valid_acc:.2f}")
+            valid_acc, valid_loss = self.eval(self.val_loader)
+            self.logger.log(f"[Epoch {epoch}] Loss: {valid_loss:.4f}, Acc: {valid_acc:.4f}")
 
-            if valid_loss < self.best_loss:
+            if valid_loss < best_loss:
                 torch.save(self.model.state_dict(), self.ckpt)
-                self.patience = self.args.patience
-                self.best_loss = valid_loss
+                patience = self.args.patience
+                best_loss = valid_loss
             else:
-                self.patience -= 1
-                if self.patience == 0: break
+                patience -= 1
+                if patience == 0: break
 
         t_end = time.perf_counter()
 
-        # Load Best Model
-        self.model = self.load_model()
+        ### Load best model
+        self.model = load_model(self.args)
         self.model.load_state_dict(torch.load(self.ckpt))
-        self.model = self.model.to(self.args.device)
+        self.model = self.model.to(self.device)
 
-        num_valid, num_invalid, exact_match, validity, test_acc = self.test(test_loader)
+        ### Compute exact match, validity, and test accuracy
+        num_valid, num_invalid, exact_match, validity, test_acc = self.test(self.test_loader)
 
-        logger.log(f"GT Valid Molecules: {num_valid}, Invalid Molecules: {num_invalid}")
-        logger.log(f"Pred EM: {exact_match:.2f}, Validity: {validity:.2f}, Acc: {test_acc} with Time: {t_end - t_start}")
+        ### Report results
+        self.logger.log(f"GT Valid Molecules: {num_valid}, Invalid Molecules: {num_invalid}")
+        self.logger.log(f"EM: {exact_match:.4f}, Validity: {validity:.4f}, Acc: {test_acc:.4f} "
+                        f"with Time: {t_end - t_start:.2f}")
 
-        result_file = "./results/{}/{}-results.txt".format(self.log_folder_name, self.exp_name)
+        result_file = f"./results/{self.log_folder_name}/{self.exp_name}.txt"
         with open(result_file, 'a+') as f:
-            f.write("{}: {} {} {}\n".format(self.args.seed, exact_match, validity, test_acc))
+            f.write(f"{self.seed}: ExactMatch={exact_match:.4f}  Validity={validity:.4f}  "
+                    f"TestAcc={test_acc:.4f}\n")
 
+
+    ### Evaluate
     def eval(self, loader):
 
         self.model.eval()
@@ -172,7 +113,7 @@ class Trainer(object):
         total_node_num = 0
 
         for _, data in enumerate(tqdm(loader, desc='[Eval]', position=0)):
-            data = data.to(self.args.device)
+            data = data.to(self.device)
             out = self.model(data)
             pred_logit = torch.softmax(out, dim=-1)
             target = data.edge_attr.argmax(-1)
@@ -187,6 +128,8 @@ class Trainer(object):
 
         return valid_acc, valid_loss.item()
 
+    
+    ### Compute exact match, validity, and test accuracy
     def test(self, loader):
 
         test_acc, _ = self.eval(loader)
@@ -207,12 +150,9 @@ class Trainer(object):
             else: num_valid += 1
             
             smiles = rdkit.Chem.MolToSmiles(mol)
-            data = data.to(self.args.device)
+            data = data.to(self.device)
             out = self.model(data)
             pred = torch.softmax(out, dim=-1).argmax(-1)
-
-            if self.args.test_only:
-                print(pred)
 
             a_pred = to_dense_adj(data.edge_index, edge_attr=pred)[0].to('cpu')
             pred_mol = mol_from_graphs(nodes, a_pred)
@@ -232,37 +172,3 @@ class Trainer(object):
 
         return num_valid, num_invalid, exact_match, validity, test_acc
 
-    def experiment_name(self):
-
-        ts = time.strftime('%Y-%b-%d-%H:%M:%S', time.gmtime())
-
-        self.log_folder_name = os.path.join(*[self.args.data, self.args.model, self.args.experiment_number])
-
-        if not(os.path.isdir('./checkpoints/{}'.format(self.log_folder_name))):
-            os.makedirs(os.path.join('./checkpoints/{}'.format(self.log_folder_name)))
-
-        if not(os.path.isdir('./results/{}'.format(self.log_folder_name))):
-            os.makedirs(os.path.join('./results/{}'.format(self.log_folder_name)))
-
-        if not(os.path.isdir('./logs/{}'.format(self.log_folder_name))):
-            os.makedirs(os.path.join('./logs/{}'.format(self.log_folder_name)))
-
-        print("Make Directory {} in Logs, Checkpoints and Results Folders".format(self.log_folder_name))
-
-        exp_name = str()
-        exp_name += "ER={}_".format(self.args.edge_ratio)
-        exp_name += "NH={}_".format(self.args.num_heads)
-        exp_name += "NC={}_".format(self.args.num_convs)
-        exp_name += "BS={}_".format(self.args.batch_size)
-        exp_name += "LR={}_".format(self.args.lr)
-        exp_name += "DO={}_".format(self.args.dropout)
-        exp_name += "HD={}_".format(self.args.num_hidden)
-        exp_name += "LN={}_".format(self.args.ln)
-        exp_name += "CS={}_".format(self.args.cluster)
-        exp_name += "LS={}_".format(self.args.lr_schedule)
-        exp_name += "TS={}".format(ts)
-
-        # Save training arguments for reproduction
-        torch.save(self.args, os.path.join('./checkpoints/{}'.format(self.log_folder_name), 'training_args.bin'))
-
-        return exp_name

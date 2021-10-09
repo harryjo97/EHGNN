@@ -1,26 +1,26 @@
-# D&D
-python main.py  --type classification_TU \
-                --data DD \
-                --model HyperDrop \
-                --gpu $1 \
-                --experiment-number $2 \
-                --batch-size 10 \
-                --num-hidden 32 \
-                --lr-schedule \
-                --edge-ratio 0.75 \
-                --seed 42
-
-# # PROTEINS
+# # D&D
 # python main.py  --type classification_TU \
-#                 --data PROTEINS \
+#                 --data DD \
 #                 --model HyperDrop \
 #                 --gpu $1 \
 #                 --experiment-number $2 \
-#                 --batch-size 128 \
-#                 --num-hidden 128 \
+#                 --batch-size 10 \
+#                 --num-hidden 32 \
 #                 --lr-schedule \
-#                 --edge-ratio 0.65 \
+#                 --edge-ratio 0.75 \
 #                 --seed 42
+
+# PROTEINS
+python main.py  --type classification_TU \
+                --data PROTEINS \
+                --model HyperDrop \
+                --gpu $1 \
+                --experiment-number $2 \
+                --batch-size 128 \
+                --num-hidden 128 \
+                --lr-schedule \
+                --edge-ratio 0.65 \
+                --seed 42
 
 # # MUTAG
 # python main.py  --type classification_TU \

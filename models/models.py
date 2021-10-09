@@ -4,10 +4,11 @@ import torch.nn.functional as F
 from torch_geometric.nn.pool.topk_pool import topk
 from torch_geometric.nn import global_mean_pool as gap, global_max_pool as gmp, global_add_pool as gsp
 from torch_geometric.utils import to_dense_batch
+from math import ceil
+
+from ogb.graphproppred.mol_encoder import AtomEncoder, BondEncoder
 from models.layers import HypergraphConv, GCNConv_OGB, GMPool
 from torch_geometric.nn import GCNConv
-from ogb.graphproppred.mol_encoder import AtomEncoder, BondEncoder
-from math import ceil
 
 
 class GraphRepresentation(nn.Module):
@@ -31,17 +32,23 @@ class GraphRepresentation(nn.Module):
         num_edge = edge_index.size(1)
         device = edge_index.device
 
+        ### Transform edge list of the original graph to hyperedge list of the dual hypergraph
+        edge_to_node_index = torch.arange(0,num_edge,1, device=device).repeat_interleave(2).view(1,-1)
         hyperedge_index = edge_index.T.reshape(1,-1)
-        hyperedge_index = torch.cat([torch.arange(0,num_edge,1, device=device).repeat_interleave(2).view(1,-1), hyperedge_index], dim=0).long() 
+        hyperedge_index = torch.cat([edge_to_node_index, hyperedge_index], dim=0).long() 
 
+        ### Transform batch of nodes to batch of edges
         edge_batch = hyperedge_index[1,:].reshape(-1,2)[:,0]
         edge_batch = torch.index_select(batch, 0, edge_batch)
 
+        ### Add self-loops to each node in the dual hypergraph
         if add_loops:
             bincount =  hyperedge_index[1].bincount()
             mask = bincount[hyperedge_index[1]]!=1
             max_edge = hyperedge_index[1].max()
-            loops = torch.cat([torch.arange(0,num_edge,1,device=device).view(1,-1), torch.arange(max_edge+1,max_edge+num_edge+1,1,device=device).view(1,-1)], dim=0)
+            loops = torch.cat([torch.arange(0,num_edge,1,device=device).view(1,-1), 
+                                torch.arange(max_edge+1,max_edge+num_edge+1,1,device=device).view(1,-1)], 
+                                dim=0)
 
             hyperedge_index = torch.cat([hyperedge_index[:,mask], loops], dim=1)
 
@@ -90,7 +97,7 @@ class Model_HyperDrop(GraphRepresentation):
 
         x, edge_index, edge_attr, batch = data.x, data.edge_index, data.edge_attr, data.batch
 
-        # edge feature initialization
+        ### Edge feature initialization
         if edge_attr is None:
             edge_attr = torch.ones((edge_index.size(1), 1), device=edge_index.device)
 
@@ -240,7 +247,8 @@ class Model_HyperCluster(GraphRepresentation):
         self.convs = self.get_convs()
         self.unconvs = self.get_unconvs()
         self.last = HypergraphConv(self.nhid, self.num_edge_features)
-        self.pool = GMPool(self.nhid, self.num_heads, self.num_seeds_edge, ln=self.ln, cluster=self.cluster, mab_conv='Hyper')
+        self.pool = GMPool(self.nhid, self.num_heads, self.num_seeds_edge, 
+                            ln=self.ln, cluster=self.cluster, mab_conv='Hyper')
 
     def forward(self, data):
 
@@ -258,7 +266,8 @@ class Model_HyperCluster(GraphRepresentation):
         extended_attention_mask = extended_attention_mask.to(dtype=next(self.parameters()).dtype)
         extended_attention_mask = (1.0 - extended_attention_mask) * -1e9
 
-        batch_edge_attr, attn = self.pool(batch_edge_attr, attention_mask=extended_attention_mask, graph=(edge_attr, hyperedge_index, edge_batch), return_attn=True)
+        batch_edge_attr, attn = self.pool(batch_edge_attr, attention_mask=extended_attention_mask, 
+                                            graph=(edge_attr, hyperedge_index, edge_batch), return_attn=True)
 
         # Unpool 
         edge_attr = torch.bmm(attn.transpose(1, 2), batch_edge_attr)   
