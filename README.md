@@ -1,6 +1,6 @@
 # Edge Representation Learning with Hypergraphs
 
-Official Code Repository for the paper "Edge Representation Learning with Hypergraphs" (NeurIPS 2021):https://arxiv.org/abs/2106.15845.
+Official Code Repository for the paper "Edge Representation Learning with Hypergraphs" (NeurIPS 2021): https://arxiv.org/abs/2106.15845.
 
 In this repository, we implement the *Dual Hypergraph Transformation* (DHT) and two edge pooling methods *HyperDrop* and *HyperCluster*.
 
@@ -48,3 +48,19 @@ sh ./scripts/classification_OGB.sh 0 000
 ## Citation
 
 If you found the provided code with our paper useful in your work, we kindly request that you cite our work.
+We are going to update the below BibTex, when the proceedings of NeurIPS 2021 will be available.
+
+```BibTex
+@article{jo2021edge,
+  author    = {Jaehyeong Jo and
+               Jinheon Baek and
+               Seul Lee and
+               Dongki Kim and
+               Minki Kang and
+               Sung Ju Hwang},
+  title     = {Edge Representation Learning with Hypergraphs},
+  journal   = {arXiv preprint arXiv:2106.15845},
+  year      = {2021},
+  url       = {https://arxiv.org/abs/2106.15845}
+}
+```
