@@ -48,19 +48,14 @@ sh ./scripts/classification_OGB.sh 0 000
 ## Citation
 
 If you found the provided code with our paper useful in your work, we kindly request that you cite our work.
-We are going to update the below BibTex, when the proceedings of NeurIPS 2021 will be available.
 
 ```BibTex
-@article{jo2021edge,
-  author    = {Jaehyeong Jo and
-               Jinheon Baek and
-               Seul Lee and
-               Dongki Kim and
-               Minki Kang and
-               Sung Ju Hwang},
-  title     = {Edge Representation Learning with Hypergraphs},
-  journal   = {arXiv preprint arXiv:2106.15845},
-  year      = {2021},
-  url       = {https://arxiv.org/abs/2106.15845}
+@inproceedings{
+  jo2021edge,
+  title={Edge Representation Learning with Hypergraphs},
+  author={Jaehyeong Jo and Jinheon Baek and Seul Lee and Dongki Kim and Minki Kang and Sung Ju Hwang},
+  booktitle={Thirty-Fifth Conference on Neural Information Processing Systems},
+  year={2021},
+  url={https://openreview.net/forum?id=vwgsqRorzz}
 }
 ```
