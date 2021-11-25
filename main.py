@@ -14,6 +14,10 @@ def main(work_type_args):
         from parsers.reconstruction_ZINC import Parser
         from trainers.reconstruction_ZINC import Trainer
         
+    elif work_type_args.type == 'classification_node':
+        from parsers.classification_node import Parser
+        from trainers.classification_node import Trainer
+
     else:
         raise ValueError("Work Type Name <{}> is Unknown".format(work_type_args.type))
 

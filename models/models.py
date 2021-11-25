@@ -9,6 +9,7 @@ from math import ceil
 from ogb.graphproppred.mol_encoder import AtomEncoder, BondEncoder
 from models.layers import HypergraphConv, GCNConv_OGB, GMPool
 from torch_geometric.nn import GCNConv
+from torch_geometric.nn.conv.gcn_conv import gcn_norm
 
 
 class GraphRepresentation(nn.Module):
@@ -24,7 +25,7 @@ class GraphRepresentation(nn.Module):
         self.num_classes = args.num_classes
         self.edge_ratio = args.edge_ratio
         self.dropout_ratio = args.dropout
-        self.enhid = self.nhid
+        self.enhid = args.num_edge_hidden if hasattr(args, 'num_edge_hidden') else self.nhid
 
     ### Dual Hypergraph Transformation (DHT)
     def DHT(self, edge_index, batch, add_loops=True):
@@ -231,8 +232,91 @@ class Model_HyperDrop_OGB(GraphRepresentation):
 
         return convs
  
+### HyperDrop model for node classification
+class Model_HyperDrop_Node(Model_HyperDrop):
 
- ### HyperCluster model
+    def __init__(self, args):
+
+        super(Model_HyperDrop, self).__init__(args)
+
+        self.convs = self.get_convs()
+        self.hyperconvs = self.get_convs(conv_type='Hyper')[:-1]
+        self.scoreconvs = self.get_scoreconvs()
+
+    def forward(self, x, adj):
+
+        edge_index = adj._indices()
+        edge_weight = None
+
+        batch = torch.zeros(edge_index.size(1), dtype=torch.long, device=edge_index.device)
+
+        for _ in range(self.args.num_convs):
+            
+            hyperedge_index, edge_batch = self.DHT(edge_index, batch)
+
+            x = F.dropout(x, self.dropout_ratio, training=self.training)
+            x = self.convs[_](x, edge_index, edge_weight)
+            if _ < self.args.num_convs-1:
+                x = F.relu(x)
+
+            if _ == 0:
+                edge_attr = torch.cat((x[edge_index[0, :]], x[edge_index[1, :]]), dim=1)
+
+            if _ < self.args.num_convs-1:
+
+                edge_attr = F.relu( self.hyperconvs[_](edge_attr, hyperedge_index) )
+                edge_attr = F.dropout(edge_attr, self.dropout_ratio, training=self.training)
+
+                if (_ % 4 != 1):  continue
+
+                score = torch.tanh( self.scoreconvs[_](edge_attr, hyperedge_index).squeeze() )
+                perm = topk(score, self.edge_ratio, edge_batch)
+
+                if self.training:
+                    edge_index = edge_index[:,perm]
+                    edge_attr = edge_attr[perm, :]
+                    edge_weight = score[perm]
+                    edge_weight = torch.clamp(edge_weight, min=0.0001, max=1)
+                    edge_index, edge_weight = gcn_norm(
+                        edge_index, edge_weight, x.size()[0], False, False)
+                else:
+                    edge_weight = score
+                    edge_weight = torch.clamp(edge_weight, min=0.0001, max=1)
+                    edge_index, edge_weight = gcn_norm(
+                        edge_index, edge_weight, x.size()[0], False, False)
+
+        return F.log_softmax(x, dim=1)
+
+    def get_convs(self, conv_type='GCN'):
+
+        convs = nn.ModuleList()
+
+        for i in range(self.args.num_convs):
+
+            if conv_type == 'GCN':
+
+                if i == 0 :
+                    conv = GCNConv(self.num_node_features, self.nhid, normalize=False)
+                elif i == self.args.num_convs - 1:
+                    conv = GCNConv(self.nhid, self.num_classes, normalize=False)
+                else:
+                    conv = GCNConv(self.nhid, self.nhid, normalize=False)
+
+            elif conv_type == 'Hyper':
+
+                if i == 0 :
+                    conv = HypergraphConv(self.num_edge_features, self.enhid)
+                else:
+                    conv = HypergraphConv(self.enhid, self.enhid)
+
+            else:
+                raise ValueError("Conv Name <{}> is Unknown".format(conv_type))
+
+            convs.append(conv)
+
+        return convs
+
+### HyperCluster model
 class Model_HyperCluster(GraphRepresentation):
 
     def __init__(self, args):
