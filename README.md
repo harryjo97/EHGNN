@@ -4,6 +4,8 @@ Official Code Repository for the paper "Edge Representation Learning with Hyperg
 
 In this repository, we implement the *Dual Hypergraph Transformation* (DHT) and two edge pooling methods *HyperDrop* and *HyperCluster*.
 
+<br/><br/>
+
 <p align="center">
     <img width="750" src="assets/model_overview.jpg"/>
 </p>
@@ -50,7 +52,7 @@ sh ./scripts/classification_OGB.sh 0 000
 If you found the provided code with our paper useful in your work, we kindly request that you cite our work.
 
 ```BibTex
-@inproceedings{DBLP:conf/nips/JoBLKKH21,
+@inproceedings{jo2021ehgnn,
   author    = {Jaehyeong Jo and
                Jinheon Baek and
                Seul Lee and
