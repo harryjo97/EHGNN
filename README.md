@@ -4,9 +4,9 @@ Official Code Repository for the paper "Edge Representation Learning with Hyperg
 
 In this repository, we implement the *Dual Hypergraph Transformation* (DHT) and two edge pooling methods *HyperDrop* and *HyperCluster*.
 
-## Abstract
-
-Graph neural networks have recently achieved remarkable success in representing graph-structured data, with rapid progress in both the node embedding and graph pooling methods. Yet, they mostly focus on capturing information from the nodes considering their connectivity, and not much work has been done in representing the edges, which are essential components of a graph. However, for tasks such as graph reconstruction and generation, as well as graph classification tasks for which the edges are important for discrimination, accurately representing edges of a given graph is crucial to the success of the graph representation learning. To this end, we propose a novel edge representation learning framework based on Dual Hypergraph Transformation (DHT), which transforms the edges of a graph into the nodes of a hypergraph. This dual hypergraph construction allows us to apply message passing techniques for node representations to edges. After obtaining edge representations from the hypergraphs, we then cluster or drop edges to obtain holistic graph-level edge representations. We validate our edge representation learning method with hypergraphs on diverse graph datasets for graph representation and generation performance, on which our method largely outperforms existing graph representation learning methods. Moreover, our edge representation learning and pooling method also largely outperforms state-of-the-art graph pooling methods on graph classification, not only because of its accurate edge representation learning, but also due to its lossless compression of the nodes and removal of irrelevant edges for effective message passing.
+<p align="center">
+    <img width="750" src="assets/model_overview.jpg"/>
+</p>
 
 ### Contribution
 
@@ -50,12 +50,18 @@ sh ./scripts/classification_OGB.sh 0 000
 If you found the provided code with our paper useful in your work, we kindly request that you cite our work.
 
 ```BibTex
-@inproceedings{
-  jo2021edge,
-  title={Edge Representation Learning with Hypergraphs},
-  author={Jaehyeong Jo and Jinheon Baek and Seul Lee and Dongki Kim and Minki Kang and Sung Ju Hwang},
-  booktitle={Thirty-Fifth Conference on Neural Information Processing Systems},
-  year={2021},
-  url={https://openreview.net/forum?id=vwgsqRorzz}
+@inproceedings{DBLP:conf/nips/JoBLKKH21,
+  author    = {Jaehyeong Jo and
+               Jinheon Baek and
+               Seul Lee and
+               Dongki Kim and
+               Minki Kang and
+               Sung Ju Hwang},
+  title     = {Edge Representation Learning with Hypergraphs},
+  booktitle = {Advances in Neural Information Processing Systems 34: Annual Conference
+               on Neural Information Processing Systems 2021, NeurIPS 2021, December
+               6-14, 2021, virtual},
+  pages     = {7534--7546},
+  year      = {2021}
 }
 ```
