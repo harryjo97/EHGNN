@@ -18,9 +18,19 @@ In this repository, we implement the *Dual Hypergraph Transformation* (DHT) and 
 
 ## Dependencies
 
-+ Python 3.7.0
-+ Pytorch 1.4.0
-+ Pytorch Geometric 1.4.3
+EHGNN is built in **Python 3.7.0** and **Pytorch 1.4.0**. Please use the following command to install the requirements:
+
+```sh
+pip install -r requirements.txt
+```
+
+additionally run the following command:
+
+```sh
+conda install -c conda-forge ogb=1.3.0
+conda install -c huggingface transformers=4.4.2
+conda install -c conda-forge rdkit=2020.03.3.0
+```
 
 ## Training and Evaluation
 

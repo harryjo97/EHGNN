@@ -1,0 +1,8 @@
+torch-sparse==0.6.1
+torch-cluster==1.5.4
+torch-scatter==2.0.4
+torch-spline-conv==1.2.0
+torch-geometric==1.6.0
+packaging==21.3
+setuptools==52.0.0
+tqdm
